@@ -6,7 +6,7 @@ import zio.logging.{ LogFormat, LogLevel, Logging, log }
 import zio.schema.{ DeriveSchema, Schema }
 import zio.web.{ Endpoints, Handler, Handlers, endpoint }
 import zio.web.codec.JsonCodec
-import zio.web.http.{ HttpMiddleware, HttpProtocolModule, HttpServer, HttpServerConfig }
+import zio.web.http.{ HttpMiddleware, HttpProtocol, HttpServer, HttpServerConfig }
 import zio.web.http.model.{ Method, Route }
 import zio.web.http.HttpClientConfig
 
@@ -16,8 +16,8 @@ object HelloServer extends App with HelloExample {
   lazy val sayHelloHandlers =
     Handlers(Handler.make(sayHello) { (name: String, req: HelloRequest) =>
       for {
-        _ <- console.putStrLn(s"Handling sayHello/$name request with ${req}")
-      } yield TextPlainResponse(s"Hello ${req.name}!")
+        _ <- console.putStrLn(s"Handling sayHello/$name request with $req")
+      } yield TextPlainResponse(s"Hi $name!")
     })
 
   // generate the server
@@ -60,8 +60,8 @@ object HelloClient extends App with HelloExample {
     for {
       _        <- log.info("Hello client started")
       config   = HttpClientConfig("localhost", 8080)
-      request  = HelloRequest("Janet", "Hi!")
-      response <- sayHelloService.invoke(sayHello)(request, "Wee").provideLayer(httpClient(config))
+      request  = HelloRequest("Secret")
+      response <- sayHelloService.invoke(sayHello)("Janet", request).provideLayer(httpClient(config))
       _        <- log.info(s"Got ${response}")
       _        <- log.info("Press [enter] to stop the client")
       _        <- console.getStrLn
@@ -77,13 +77,13 @@ object HelloClient extends App with HelloExample {
     (ZLayer.requires[ZEnv with Logging] ++ ZLayer.succeed(config)) >+> helloClientLayer
 }
 
-trait HelloExample extends HttpProtocolModule {
+trait HelloExample extends HttpProtocol {
 
   // code shared between client and server
   val allProtocols    = Map.empty
   val defaultProtocol = JsonCodec
 
-  sealed case class HelloRequest(name: String, message: String)
+  sealed case class HelloRequest(message: String)
   sealed case class TextPlainResponse(content: String)
 
   val helloSchema: Schema[HelloRequest]          = DeriveSchema.gen

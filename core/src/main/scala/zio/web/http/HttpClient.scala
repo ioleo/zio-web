@@ -2,14 +2,14 @@ package zio.web.http
 
 import java.io.{ IOException, StringReader }
 
-import zio.{ Chunk, IO, Task, ZIO, ZManaged }
+import zio.{ =!=, Chunk, IO, Task, ZIO, ZManaged }
 import zio.clock.Clock
 import zio.duration._
 import zio.nio.core.{ InetSocketAddress, SocketAddress }
 import zio.nio.core.channels.{ AsynchronousChannelGroup, AsynchronousSocketChannel }
 import zio.logging.{ Logging, log }
 import zio.stream.ZStream
-import zio.web.{ AnyF, Endpoint, Endpoints, ProtocolModule }
+import zio.web.{ AnyF, Client, Endpoint, Endpoints }
 import zio.web.codec.JsonCodec
 import zio.web.http.model.{ Method, Version }
 import zio.web.http.internal.{ ChannelReader, HttpLexer }
@@ -18,11 +18,11 @@ final class HttpClient[Ids](
   address: InetSocketAddress,
   channelGroup: AsynchronousChannelGroup,
   env: Clock with Logging
-) extends ProtocolModule.Client[Ids] {
+) extends Client[MinMetadata, Ids] {
 
   import HttpClient._
 
-  def invoke[M[+_], P, I, O](endpoint: Endpoint[M, P, I, O])(input: I, params: P)(
+  def invoke[M[+_] <: MinMetadata[_], P, I, O](endpoint: Endpoint[M, P, I, O])(params: P, input: I)(
     implicit ev: Ids <:< endpoint.Id
   ): Task[O] =
     (for {
@@ -55,7 +55,7 @@ final class HttpClient[Ids](
 
 object HttpClient {
 
-  def build[M[+_], Ids](
+  def build[M[+_] <: MinMetadata[_], Ids](
     config: HttpClientConfig,
     endpoints: Endpoints[M, Ids]
   ): ZManaged[Clock with Logging, IOException, HttpClient[Ids]] =
@@ -93,5 +93,11 @@ object HttpClient {
   private def charSequenceToByteChunk(chars: CharSequence): Chunk[Byte] = {
     val bytes: Seq[Byte] = for (i <- 0 until chars.length) yield chars.charAt(i).toByte
     Chunk.fromIterable(bytes)
+  }
+
+  final case class StartLineBuilder[P, M[+_] <: MinMetadata[P]](endpoint: Endpoint[M, P, _, _]) {
+    def apply()(implicit ev: P =:= Unit): String = ???
+
+    def apply(params: P)(implicit ev: P =!= Unit): String = ???
   }
 }

@@ -4,7 +4,7 @@ import zio._
 import zio.schema._
 import zio.web.{ Handler, endpoint }
 import zio.web.codec.JsonCodec
-import zio.web.http.{ HttpMiddleware, HttpProtocolModule }
+import zio.web.http.{ HttpMiddleware, HttpProtocol }
 import zio.web.http.model.{ Method, Route }
 
 object UsersServer extends UsersExample {
@@ -45,7 +45,7 @@ object UsersDocs extends UsersExample {
   lazy val docs = makeDocs(userService)
 }
 
-trait UsersExample extends HttpProtocolModule {
+trait UsersExample extends HttpProtocol {
 
   val allProtocols    = Map.empty
   val defaultProtocol = JsonCodec
