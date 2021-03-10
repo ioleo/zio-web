@@ -14,9 +14,9 @@ object HelloServer extends App with HelloExample {
 
   // just define handlers for all endpoints
   lazy val sayHelloHandlers =
-    Handlers(Handler.make(sayHello) { (req: HelloRequest) =>
+    Handlers(Handler.make(sayHello) { (name: String, req: HelloRequest) =>
       for {
-        _ <- console.putStrLn(s"Handling sayHello request for ${req.name}")
+        _ <- console.putStrLn(s"Handling sayHello/$name request with ${req}")
       } yield TextPlainResponse(s"Hello ${req.name}!")
     })
 
@@ -61,7 +61,7 @@ object HelloClient extends App with HelloExample {
       _        <- log.info("Hello client started")
       config   = HttpClientConfig("localhost", 8080)
       request  = HelloRequest("Janet", "Hi!")
-      response <- sayHelloService.invoke(sayHello)(request).provideLayer(httpClient(config))
+      response <- sayHelloService.invoke(sayHello)(request, "Wee").provideLayer(httpClient(config))
       _        <- log.info(s"Got ${response}")
       _        <- log.info("Press [enter] to stop the client")
       _        <- console.getStrLn
@@ -89,10 +89,12 @@ trait HelloExample extends HttpProtocolModule {
   val helloSchema: Schema[HelloRequest]          = DeriveSchema.gen
   val textPlainSchema: Schema[TextPlainResponse] = DeriveSchema.gen
 
+  import Route.Path._
+
   val sayHello =
     endpoint("sayHello")
       .withRequest(helloSchema)
-      .withResponse(textPlainSchema) @@ Route("/{name}") @@ Method.GET
+      .withResponse(textPlainSchema) @@ Route(_ / StringVal) @@ Method.POST
 
   lazy val sayHelloService = Endpoints(sayHello)
 }

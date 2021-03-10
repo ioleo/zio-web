@@ -39,7 +39,7 @@ object GreetingModule extends HttpProtocolModule {
   val greetingEndpoint =
     endpoint("greet")
       .withRequest(Schema[String])
-      .withResponse(Schema[String]) @@ Route("/greet/") @@ Method.GET
+      .withResponse(Schema[String]) @@ Route(_ / "greet") @@ Method.GET
 
   val endpoints = Endpoints(greetingEndpoint)
 
