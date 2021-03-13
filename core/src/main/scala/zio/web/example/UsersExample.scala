@@ -64,9 +64,9 @@ trait UsersExample extends HttpProtocol {
   val joeId: UserId  = UserId(123123)
   val maryId: UserId = UserId(22)
 
-  import Route.Path._
+  import Route._
 
-  val UserIdVal = IntVal.derrive[UserId](UserId(_), _.id)
+  val UserIdVal = IntVal.derive[UserId](UserId(_), _.id)
 
   val getUserProfile =
     endpoint("getUserProfile")

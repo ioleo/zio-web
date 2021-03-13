@@ -1,7 +1,6 @@
 package zio.web.http.model
 
 import java.util.UUID
-
 import zio.web.internal.Combine
 
 sealed trait HttpAnn[+A]
@@ -49,51 +48,45 @@ object Method {
     }
 }
 
-final case class Route[+A] private (path: Route.Path[A]) extends HttpAnn[A]
+sealed trait Route[+A] extends HttpAnn[A]
 
 object Route {
+  def apply[A](f: Root => Route[A]): Route[A] = f(Root)
 
-  def apply[A](f: Path.Root => Path[A]): Route[A] = Route(f(Path.Root))
+  sealed private[http] trait Root extends Route[Unit]
+  private[http] object Root       extends Root
 
-  /**
-   * TODO: fiddle around with this encoding and see how the surface API "feels"
-   *       can we get rid of `Root` and still have things infer nicely?
-   */
-  sealed trait Path[+A]
+  final private[http] case class Static(value: String) extends Route[Unit]
 
-  object Path {
+  final private[http] case class Chain[L, R, P] private (
+    left: Route[L],
+    right: Route[R],
+    combine: Combine.Aux[L, R, P]
+  ) extends Route[P]
 
-    sealed private[Route] trait Root extends Path[Unit]
-    private[Route] object Root       extends Root
+  private object Chain {
 
-    final private case class Static(value: String) extends Path[Unit]
+    def apply[L, R, P](left: Route[L], right: Route[R])(implicit c: Combine[L, R]): Route[c.Out] =
+      Chain(left, right, c.asInstanceOf[Combine.Aux[L, R, c.Out]])
+  }
 
-    final private case class Chain[A, B, C] private (left: Path[A], right: Path[B]) extends Path[C]
+  final case class Param[A](from: String => A, to: A => String) extends Route[A] {
 
-    private object Chain {
+    def derive[B](map: A => B, contramap: B => A): Route[B] =
+      Param[B](v => map(from(v)), v => to(contramap(v)))
+  }
 
-      def apply[A, B](left: Path[A], right: Path[B])(implicit c: Combine[A, B]): Path[c.Out] =
-        Chain[A, B, c.Out](left, right)
-    }
+  val IntVal    = Param[Int](_.toInt, _.toString)
+  val LongVal   = Param[Long](_.toLong, _.toString)
+  val StringVal = Param[String](identity, identity)
+  val UUIDVal   = Param[UUID](UUID.fromString, _.toString)
 
-    final case class Param[A](from: String => A, to: A => String) extends Path[A] { self =>
+  implicit class RouteOps[L](self: Route[L]) {
 
-      def derrive[B](map: A => B, contramap: B => A): Path[B] =
-        Param[B](v => map(from(v)), v => to(contramap(v)))
-    }
+    final def /(segment: String): Route[L] =
+      Chain[L, Unit, L](self, Static(segment))
 
-    val IntVal    = Param[Int](_.toInt, _.toString)
-    val LongVal   = Param[Long](_.toLong, _.toString)
-    val StringVal = Param[String](identity, identity)
-    val UUIDVal   = Param[UUID](UUID.fromString, _.toString)
-
-    implicit class PathOps[A](self: Path[A]) {
-
-      final def /(segment: String): Path[A] =
-        Path.Chain(self, Path.Static(segment))
-
-      final def /[B](path: Path[B])(implicit c: Combine[A, B]): Path[c.Out] =
-        Chain(self, path)
-    }
+    final def /[R](that: Route[R])(implicit c: Combine[L, R]): Route[c.Out] =
+      Chain[L, R, c.Out](self, that)
   }
 }

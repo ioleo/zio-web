@@ -155,7 +155,7 @@ object HttpServer {
 
     val awaitShutdown: IO[Throwable, Unit] = closed.await
 
-    val read: URIO[Logging, Unit] =
+    val read: ZIO[Logging, IOException, Unit] =
       (for {
         _           <- awaitOpen
         reader      = ChannelReader(channel, 32)

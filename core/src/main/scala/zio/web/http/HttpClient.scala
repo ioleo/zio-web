@@ -2,34 +2,34 @@ package zio.web.http
 
 import java.io.{ IOException, StringReader }
 
-import zio.{ =!=, Chunk, IO, Task, ZIO, ZManaged }
+import zio.{ Chunk, IO, Task, ZIO, ZManaged }
 import zio.clock.Clock
 import zio.duration._
 import zio.nio.core.{ InetSocketAddress, SocketAddress }
 import zio.nio.core.channels.{ AsynchronousChannelGroup, AsynchronousSocketChannel }
 import zio.logging.{ Logging, log }
 import zio.stream.ZStream
-import zio.web.{ AnyF, Client, Endpoint, Endpoints }
+import zio.web.{ Annotations, AnyF, Client, Endpoint, Endpoints }
 import zio.web.codec.JsonCodec
-import zio.web.http.model.{ Method, Version }
+import zio.web.http.model.{ HttpAnn, Method, Route, Version }
 import zio.web.http.internal.{ ChannelReader, HttpLexer }
 
 final class HttpClient[Ids](
   address: InetSocketAddress,
   channelGroup: AsynchronousChannelGroup,
   env: Clock with Logging
-) extends Client[MinMetadata, Ids] {
+) extends Client[HttpAnn, Ids] {
 
   import HttpClient._
 
-  def invoke[M[+_] <: MinMetadata[_], P, I, O](endpoint: Endpoint[M, P, I, O])(params: P, input: I)(
+  def invoke[P, M[+_] <: HttpAnn[_], I, O](endpoint: Endpoint[M, P, I, O])(params: P, input: I)(
     implicit ev: Ids <:< endpoint.Id
   ): Task[O] =
     (for {
       _           <- log.info(s"Invoking [${endpoint.endpointName}].")
       channel     <- AsynchronousSocketChannel(channelGroup)
       _           <- channel.connect(address)
-      request     <- encodeRequest(endpoint)(input)
+      request     <- encodeRequest(endpoint)(params, input)
       _           <- channel.writeChunk(request)
       _           <- log.info(s"Sent request")
       reader      = ChannelReader(channel, 32, 30.seconds)
@@ -40,7 +40,7 @@ final class HttpClient[Ids](
       headerLines = new String(data.value.toArray)
       _           <- log.info(s"Read headers:\n$headerLines")
       // TODO: extract headers parsing and wrap them in HttpHeaders to tidy up a little here
-      headerNames  = Array("Content-Length") // TODO: handle when not given then do not read the content
+      headerNames  = Array("Content-Length") // TODO: when not present then do not read the content
       headerValues = HttpLexer.parseHeaders(headerNames, new StringReader(headerLines))
       headers = headerNames
         .zip(headerValues.map(_.headOption))
@@ -55,7 +55,7 @@ final class HttpClient[Ids](
 
 object HttpClient {
 
-  def build[M[+_] <: MinMetadata[_], Ids](
+  def build[M[+_] <: HttpAnn[_], Ids](
     config: HttpClientConfig,
     endpoints: Endpoints[M, Ids]
   ): ZManaged[Clock with Logging, IOException, HttpClient[Ids]] =
@@ -70,16 +70,20 @@ object HttpClient {
 
   final private[http] case class ResponseMessage(headers: Chunk[Byte], body: Chunk[Byte])
 
-  private def encodeRequest[I](endpoint: Endpoint[AnyF, _, I, _])(input: I): IO[IOException, Chunk[Byte]] =
+  private def encodeRequest[P, M[+_] <: HttpAnn[_], I](
+    endpoint: Endpoint[M, P, I, _]
+  )(params: P, input: I): ZIO[Logging, IOException, Chunk[Byte]] =
     for {
-      body <- ZStream.succeed(input).transduce(JsonCodec.encoder(endpoint.request)).runCollect
+      body      <- ZStream.succeed(input).transduce(JsonCodec.encoder(endpoint.request)).runCollect
+      startLine = buildStartLine(endpoint, params)
       header <- ZIO.succeed(
                  Seq(
-                   s"${Method.POST.name} /${endpoint.endpointName} ${Version.V1_1.name}",
+                   startLine,
                    "Content-Type: application/json",
                    s"Content-Length: ${body.size}"
                  ).mkString("", "\r\n", "\r\n\r\n")
                )
+      _ <- log.info(s"Request header: $header")
     } yield charSequenceToByteChunk(header) ++ body
 
   private def decodeResponse[O](endpoint: Endpoint[AnyF, _, _, O])(bytes: Chunk[Byte]): IO[IOException, O] =
@@ -95,9 +99,40 @@ object HttpClient {
     Chunk.fromIterable(bytes)
   }
 
-  final case class StartLineBuilder[P, M[+_] <: MinMetadata[P]](endpoint: Endpoint[M, P, _, _]) {
-    def apply()(implicit ev: P =:= Unit): String = ???
+  // TODO: once the server router correctly parses URI's clean up a little
+  final case class StartLine(method: Option[String], uri: Option[String])
 
-    def apply(params: P)(implicit ev: P =!= Unit): String = ???
+  private def buildStartLine[P, M[+_] <: HttpAnn[_]](endpoint: Endpoint[M, P, _, _], params: P): String = {
+    def loop[P0](acc: StartLine, ann: Annotations[M, P0], params: P0): String =
+      ann match {
+        case cons: Annotations.Cons[M, _, _, P0] =>
+          val (pHead, pTail) = cons.combine.unpack(params)
+          val nextAcc = cons.head.asInstanceOf[HttpAnn[cons.combine.Left]] match {
+            case m: Method                   => acc.copy(method = Some(m.name))
+            case r: Route[cons.combine.Left] => acc.copy(uri = Some(renderRoute(r, pHead)))
+          }
+
+          loop(nextAcc, cons.tail, pTail)
+
+        case Annotations.None =>
+          val method  = acc.method.getOrElse(Method.GET.name)
+          val uri     = acc.uri.getOrElse("/")
+          val version = Version.V1_1.name
+          s"$method $uri $version"
+      }
+
+    loop(StartLine(None, None), endpoint.annotations, params)
   }
+
+  private def renderRoute[A](route: Route[A], param: A): String =
+    route match {
+      case _: Route.Root     => ""
+      case r: Route.Static   => r.value
+      case r: Route.Param[A] => r.to(param)
+      case r: Route.Chain[_, _, A] =>
+        val (lp, rp) = r.combine.unpack(param)
+        val prefix   = renderRoute(r.left, lp)
+        val suffix   = renderRoute(r.right, rp)
+        s"$prefix/$suffix"
+    }
 }

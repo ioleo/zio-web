@@ -89,12 +89,12 @@ trait HelloExample extends HttpProtocol {
   val helloSchema: Schema[HelloRequest]          = DeriveSchema.gen
   val textPlainSchema: Schema[TextPlainResponse] = DeriveSchema.gen
 
-  import Route.Path._
+  import Route._
 
   val sayHello =
     endpoint("sayHello")
       .withRequest(helloSchema)
-      .withResponse(textPlainSchema) @@ Route(_ / StringVal) @@ Method.POST
+      .withResponse(textPlainSchema) @@ Route(_ / "sayHello" / StringVal) @@ Method.POST
 
   lazy val sayHelloService = Endpoints(sayHello)
 }

@@ -11,7 +11,7 @@ sealed trait Annotations[+M[+_], A] { self =>
 object Annotations {
 
   case object None extends Annotations[NothingF, Unit]
-  final case class Cons[M[+_], A, B, X](head: M[A], tail: Annotations[M, B], combine: Combine[A, B])
+  final case class Cons[M[+_], A, B, X](head: M[A], tail: Annotations[M, B], combine: Combine.Aux[A, B, X])
       extends Annotations[M, X]
 
   val none: Annotations[NothingF, Unit] = None
