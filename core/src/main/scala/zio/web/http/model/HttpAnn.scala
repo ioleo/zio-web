@@ -51,42 +51,40 @@ object Method {
 sealed trait Route[+A] extends HttpAnn[A]
 
 object Route {
+  case class Cons[P0, H <: Segment[P0], P, T <: Route[P], O] private (
+    head: H,
+    tail: T,
+    combine: Combine.Aux[P0, P, O]
+  ) extends Route[O]
+
+  sealed trait Root extends Route[Unit]
+  case object Root  extends Root
+
+  sealed trait Segment[A]
+
+  object Segment {
+    final private[http] case class Static(value: String) extends Segment[Unit]
+
+    final case class Param[A](from: String => A, to: A => String) extends Segment[A] {
+
+      def derive[B](map: A => B, contramap: B => A): Param[B] =
+        Param[B](v => map(from(v)), v => to(contramap(v)))
+    }
+  }
+
+  val IntVal    = Segment.Param[Int](_.toInt, _.toString)
+  val LongVal   = Segment.Param[Long](_.toLong, _.toString)
+  val StringVal = Segment.Param[String](identity, identity)
+  val UUIDVal   = Segment.Param[UUID](UUID.fromString, _.toString)
+
   def apply[A](f: Root => Route[A]): Route[A] = f(Root)
 
-  sealed private[http] trait Root extends Route[Unit]
-  private[http] object Root       extends Root
+  implicit class RouteOps[P](tail: Route[P]) {
 
-  final private[http] case class Static(value: String) extends Route[Unit]
+    final def /(segment: String)(implicit c: Combine[Unit, P]): Route[c.Out] =
+      Cons[Unit, Segment.Static, P, Route[P], c.Out](Segment.Static(segment), tail, c)
 
-  final private[http] case class Chain[L, R, P] private (
-    left: Route[L],
-    right: Route[R],
-    combine: Combine.Aux[L, R, P]
-  ) extends Route[P]
-
-  private object Chain {
-
-    def apply[L, R, P](left: Route[L], right: Route[R])(implicit c: Combine[L, R]): Route[c.Out] =
-      Chain(left, right, c.asInstanceOf[Combine.Aux[L, R, c.Out]])
-  }
-
-  final case class Param[A](from: String => A, to: A => String) extends Route[A] {
-
-    def derive[B](map: A => B, contramap: B => A): Route[B] =
-      Param[B](v => map(from(v)), v => to(contramap(v)))
-  }
-
-  val IntVal    = Param[Int](_.toInt, _.toString)
-  val LongVal   = Param[Long](_.toLong, _.toString)
-  val StringVal = Param[String](identity, identity)
-  val UUIDVal   = Param[UUID](UUID.fromString, _.toString)
-
-  implicit class RouteOps[L](self: Route[L]) {
-
-    final def /(segment: String): Route[L] =
-      Chain[L, Unit, L](self, Static(segment))
-
-    final def /[R](that: Route[R])(implicit c: Combine[L, R]): Route[c.Out] =
-      Chain[L, R, c.Out](self, that)
+    final def /[P0](param: Segment.Param[P0])(implicit c: Combine[P0, P]): Route[c.Out] =
+      Cons[P0, Segment.Param[P0], P, Route[P], c.Out](param, tail, c)
   }
 }

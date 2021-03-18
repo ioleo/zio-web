@@ -124,15 +124,23 @@ object HttpClient {
     loop(StartLine(None, None), endpoint.annotations, params)
   }
 
-  private def renderRoute[A](route: Route[A], param: A): String =
-    route match {
-      case _: Route.Root     => ""
-      case r: Route.Static   => r.value
-      case r: Route.Param[A] => r.to(param)
-      case r: Route.Chain[_, _, A] =>
-        val (lp, rp) = r.combine.unpack(param)
-        val prefix   = renderRoute(r.left, lp)
-        val suffix   = renderRoute(r.right, rp)
-        s"$prefix/$suffix"
-    }
+  private def renderRoute[A](route: Route[A], param: A): String = {
+    def loop[B](acc: List[String], route: Route[B], param: B): List[String] =
+      route match {
+        case Route.Root => acc
+        case r: Route.Cons[_, _, _, _, B] =>
+          val (hParam, tParam) = r.combine.unpack(param)
+          val segment          = render(r.head, hParam)
+
+          loop(segment :: acc, r.tail, tParam)
+      }
+
+    def render[B](segment: Route.Segment[B], param: B): String =
+      segment match {
+        case Route.Segment.Static(segment) => segment
+        case Route.Segment.Param(_, to)    => to(param)
+      }
+
+    loop(Nil, route, param).mkString("/", "/", "")
+  }
 }
